@@ -32,12 +32,14 @@ class VectorFieldVisual(visuals.Visual):
         for(int i=0; i<step; i++){
             for(int j=0; j<n_step; j++){
                 uv = texture2D(field, loc/field_shape.xy).rg;
-                loc += 0.001 * uv;
+                float length = clamp(length(uv), 0.5, 1.0) * 0.05;
+                uv = length * normalize(uv);
+                loc += uv;
             }
         }
         vec3 hsv = vec3(atan(uv.y, uv.x)/6.28+0.5, 0.5, 0.8);
-        color = vec4(hsv2rgb(hsv), sqrt(length(uv)/200));
-        gl_Position = $transform(vec4(loc, 0, 1));
+        color = vec4(hsv2rgb(hsv), 1.0);
+        gl_Position = $transform(vec4(loc, 0.0, 1.0));
     }
     '''
 
@@ -50,17 +52,15 @@ class VectorFieldVisual(visuals.Visual):
 
     void main(){
         float loc = step / n_step;
-        float t = 0.3*time + time_offset;
-        float x = (-t + loc);
-        float alpha = mod(x, 1);
-        alpha *= (1+cos(3.14 * (loc-0.1))) * 0.5;
-        //alpha *= (1+cos(3.14 * 10* loc)) * 0.9;
-        vec3 final_color = mix(color.rgb, vec3(1,1,1), 0.0);
-        gl_FragColor = vec4(final_color.rgb, color.a * alpha);
+        float t = 0.5*time + time_offset;
+        float envelop = 0.5*(1-cos(2*3.14*loc));
+        float alpha = envelop * 0.5*(1+sin(2*3.14 * (loc-t)));
+        gl_FragColor = vec4(color.rgb, alpha);
     }
     '''
 
-    def __init__(self, field, nstep=30, spacing = 0.5):
+    def __init__(self, field, nstep=10, spacing = 1.0):
+
         
 
         self.field = field
@@ -91,7 +91,6 @@ class VectorFieldVisual(visuals.Visual):
         self.shared_program['field_shape'] = field.shape[:2]
         self.shared_program['n_step'] = nstep
 
-        
         self.shared_program['offset'] = self.offset
         self.shared_program['field'] = self.field
 
@@ -125,20 +124,20 @@ class VectorFieldVisual(visuals.Visual):
         self.shared_program['time'] = self.time
         self.update()
 
-# def fn(y, x):
-#     dx = x-50
-#     dy = y-20
-#     hyp = (dx**2 + dy**2)**0.5 + 0.01
-#     return np.array([100 * dy / hyp**1.7, -100 * dx / hyp**1.8])
 
-def fn(x,y,t=0):
-    dx = x-50
-    dy = y-50
-    # vx = -dy
-    # vy = dx
-    vx = np.cos(t) * dx + np.sin(t) * dy
-    vy = -np.sin(t) * dx + np.cos(t) * dy
-    return np.array([vx, vy]) #=[vy,vx]
+def getFn(x0,x1,m, y0,y1,n):
+
+    def fn(i,j, ci=m//2, cj=n//2, t=None):
+        x = i/m*(x1-x0) + x0
+        y = j/n*(y1-y0) + y0
+        # vx = -dy
+        # vy = dx
+        # vx = np.cos(t) * dx + np.sin(t) * dy
+        # vy = -np.sin(t) * dx + np.cos(t) * dy
+        vx = x*(3-5*y) #x-rabbit
+        vy = y*(2*x-1) #y-fox
+        return np.array([vx, vy]) #=[vy,vx]
+    return fn
 
 VectorField = scene.visuals.create_visual_node(VectorFieldVisual)
 canvas = scene.SceneCanvas(size=[1600,1600],
@@ -158,9 +157,9 @@ view.camera.rect = (0,0,100,100)
 #     color='w',anchor_x='left', 
 #     parent=view, pos=(20, 30))
 
-field = np.fromfunction(fn, (100, 100)).transpose(2,1,0).astype('float32')
+field = np.fromfunction(getFn(0.0,5,100, 0.0,5,100), (100, 100)).transpose(2,1,0).astype('float32')
 # field[..., 0] += 10 * np.cos(np.linspace(0, 2 * 3.1415, 100))
-vfield = VectorField(field, parent=view.scene)
+vfield = VectorField(field, nstep=15, spacing=1.0, parent=view.scene)
 
 t = 0
 @canvas.connect
